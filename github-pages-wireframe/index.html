@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>个人管理网站 - 四主页面低保真原型</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main class="phone-shell" aria-label="手机端低保真原型">
+      <header class="prototype-bar">
+        <div>
+          <p class="eyebrow">MVP wireframe</p>
+          <h1 id="screenTitle">今日</h1>
+        </div>
+        <button class="ghost-button" id="toggleEmpty" type="button">空状态</button>
+      </header>
+
+      <section class="screen active" id="screen-today" data-title="今日">
+        <div class="hero-block">
+          <div>
+            <p class="muted">2026年6月26日 周五</p>
+            <h2>今天想先记哪一件事？</h2>
+          </div>
+          <button class="icon-button" data-action="settings" aria-label="设置">设置</button>
+        </div>
+
+        <section class="section">
+          <div class="section-title">
+            <h3>快捷新增</h3>
+            <span>1 到 2 步开始</span>
+          </div>
+          <div class="quick-grid">
+            <button class="quick-card" data-drawer="body">
+              <strong>身体</strong>
+              <span>测量 / 运动 / 月经 / 状态</span>
+            </button>
+            <button class="quick-card" data-form="学习记录">
+              <strong>学习</strong>
+              <span>记录时长、数量、进度</span>
+            </button>
+            <button class="quick-card" data-form="兴趣进展">
+              <strong>兴趣</strong>
+              <span>上传照片、写进展</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="section data-state">
+          <div class="section-title">
+            <h3>今日已记录</h3>
+            <button class="text-button" data-drawer="backfill" type="button">补记</button>
+          </div>
+          <div class="record-list">
+            <button class="record-card" data-detail="身体测量">
+              <span class="tag">身体</span>
+              <strong>57.8 kg · 晨起空腹</strong>
+              <small>体脂率 28.4%，家用体脂秤</small>
+            </button>
+            <button class="record-card" data-detail="学习记录">
+              <span class="tag">学习</span>
+              <strong>日语 45 分钟</strong>
+              <small>完成教材 2 页，下次从第 38 页继续</small>
+            </button>
+            <button class="record-card" data-detail="兴趣进展">
+              <span class="tag">兴趣</span>
+              <strong>第一次制作衬衫</strong>
+              <small>袖口试缝，上传 3 张照片</small>
+            </button>
+          </div>
+        </section>
+
+        <section class="section empty-state">
+          <div class="empty-box">
+            <h3>今天还没有记录</h3>
+            <p>可以只记一件最重要的事，之后再慢慢补充。</p>
+            <button class="primary-button" data-drawer="body" type="button">先记录身体</button>
+          </div>
+        </section>
+
+        <section class="section">
+          <button class="wide-button" data-drawer="backfill" type="button">补记过去日期</button>
+        </section>
+      </section>
+
+      <section class="screen" id="screen-body" data-title="身体">
+        <div class="page-head">
+          <div>
+            <p class="eyebrow">Body overview</p>
+            <h2>身体</h2>
+          </div>
+          <button class="primary-button small" data-drawer="body" type="button">新增</button>
+        </div>
+
+        <div class="segmented" data-group="range">
+          <button class="active" type="button">7天</button>
+          <button type="button">30天</button>
+          <button type="button">月度</button>
+        </div>
+
+        <section class="section data-state">
+          <h3>最近身体测量</h3>
+          <div class="metric-row">
+            <div class="metric-card">
+              <span>体重</span>
+              <strong>57.8</strong>
+              <small>kg</small>
+            </div>
+            <div class="metric-card">
+              <span>体脂率</span>
+              <strong>28.4</strong>
+              <small>%</small>
+            </div>
+            <div class="metric-card">
+              <span>骨骼肌量</span>
+              <strong>21.3</strong>
+              <small>kg</small>
+            </div>
+          </div>
+          <p class="hint">晨起空腹 · 家用体脂秤 · 数据用于趋势参考</p>
+        </section>
+
+        <section class="section data-state">
+          <div class="section-title">
+            <h3>趋势</h3>
+            <span>每日代表值</span>
+          </div>
+          <div class="mini-tabs">
+            <button class="active" data-metric="体重" type="button">体重</button>
+            <button data-metric="体脂率" type="button">体脂率</button>
+            <button data-metric="骨骼肌量" type="button">骨骼肌量</button>
+          </div>
+          <div class="chart-placeholder" id="bodyChart" aria-label="趋势图占位">
+            <span>体重趋势占位图</span>
+          </div>
+          <p class="hint">跨设备数据会提示“测量来源不同，变化仅供参考”。</p>
+        </section>
+
+        <section class="section split data-state">
+          <div class="summary-card">
+            <h3>运动统计</h3>
+            <p><strong>4</strong> 次 · <strong>185</strong> 分钟</p>
+            <small>跑步距离 8.2 km</small>
+          </div>
+          <div class="summary-card">
+            <h3>月经回顾</h3>
+            <p>最近开始 6月18日</p>
+            <small>持续 5 天，仅做记录回顾</small>
+          </div>
+        </section>
+
+        <section class="section data-state">
+          <h3>身体状态摘要</h3>
+          <div class="chip-row">
+            <span class="chip">疲劳 3次</span>
+            <span class="chip">浮肿 2次</span>
+            <span class="chip">睡眠不足 2次</span>
+          </div>
+        </section>
+
+        <section class="section data-state">
+          <div class="section-title">
+            <h3>最近身体记录</h3>
+            <button class="text-button" data-drawer="backfill" type="button">补记</button>
+          </div>
+          <button class="list-row" data-detail="运动记录">
+            <strong>6月25日 · 跑步 32 分钟</strong>
+            <span>距离 4.1 km，中等强度</span>
+          </button>
+          <button class="list-row" data-detail="身体状态">
+            <strong>6月24日 · 疲劳 / 浮肿</strong>
+            <span>备注：睡眠不足</span>
+          </button>
+        </section>
+
+        <section class="section empty-state">
+          <div class="empty-box">
+            <h3>还没有身体记录</h3>
+            <p>先记录一次测量或运动，趋势会在数据足够后出现。</p>
+            <button class="primary-button" data-drawer="body" type="button">新增身体记录</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="screen" id="screen-study" data-title="学习">
+        <div class="page-head">
+          <div>
+            <p class="eyebrow">Study overview</p>
+            <h2>学习</h2>
+          </div>
+          <div class="button-pair">
+            <button class="ghost-button small" data-form="学习项目" type="button">新项目</button>
+            <button class="primary-button small" data-form="学习记录" type="button">记录</button>
+          </div>
+        </div>
+
+        <div class="segmented" data-group="range">
+          <button class="active" type="button">7天</button>
+          <button type="button">30天</button>
+          <button type="button">月度</button>
+        </div>
+
+        <section class="section data-state">
+          <h3>学习统计</h3>
+          <div class="metric-row">
+            <div class="metric-card">
+              <span>学习天数</span>
+              <strong>5</strong>
+              <small>天</small>
+            </div>
+            <div class="metric-card">
+              <span>累计时长</span>
+              <strong>6.5</strong>
+              <small>小时</small>
+            </div>
+            <div class="metric-card">
+              <span>完成数量</span>
+              <strong>42</strong>
+              <small>页</small>
+            </div>
+          </div>
+        </section>
+
+        <section class="section data-state">
+          <div class="section-title">
+            <h3>当前学习项目</h3>
+            <button class="text-button" data-form="学习项目" type="button">新建</button>
+          </div>
+          <div class="project-stack">
+            <button class="project-card" data-jump="学习项目详情">
+              <strong>日语</strong>
+              <span>最近今天 · 主单位：页</span>
+            </button>
+            <button class="project-card" data-jump="学习项目详情">
+              <strong>外刊</strong>
+              <span>5 天未记录 · 建议回看安排</span>
+            </button>
+            <button class="project-card" data-jump="学习项目详情">
+              <strong>阅读</strong>
+              <span>本周 2 次 · 18 页</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="section data-state">
+          <h3>项目投入比例</h3>
+          <div class="bar-list">
+            <div><span>日语</span><i style="width:45%"></i><b>45%</b></div>
+            <div><span>外刊</span><i style="width:30%"></i><b>30%</b></div>
+            <div><span>阅读</span><i style="width:25%"></i><b>25%</b></div>
+          </div>
+          <p class="hint">优先按学习时长计算；无时长记录不进入占比。</p>
+        </section>
+
+        <section class="section data-state">
+          <h3>最近学习记录</h3>
+          <button class="list-row" data-detail="学习记录">
+            <strong>今天 · 日语 45 分钟</strong>
+            <span>教材 2 页，下次从第 38 页继续</span>
+          </button>
+          <button class="list-row" data-detail="学习记录">
+            <strong>6月24日 · 阅读 30 分钟</strong>
+            <span>《西西弗神话》整理笔记</span>
+          </button>
+        </section>
+
+        <section class="section data-state">
+          <h3>活跃或停滞项目</h3>
+          <div class="notice-list">
+            <p>日语记录稳定：近 7 天记录 4 次。</p>
+            <p>外刊 5 天未记录，可以下次从第 3 篇继续。</p>
+          </div>
+        </section>
+
+        <section class="section empty-state">
+          <div class="empty-box">
+            <h3>还没有学习项目</h3>
+            <p>先创建一个项目，之后每次学习只需要补一条记录。</p>
+            <button class="primary-button" data-form="学习项目" type="button">新建第一个学习项目</button>
+          </div>
+        </section>
+      </section>
+
+      <section class="screen" id="screen-hobby" data-title="兴趣">
+        <div class="page-head">
+          <div>
+            <p class="eyebrow">Hobby archive</p>
+            <h2>兴趣</h2>
+          </div>
+          <div class="button-pair">
+            <button class="ghost-button small" data-form="兴趣项目" type="button">新项目</button>
+            <button class="primary-button small" data-form="兴趣进展" type="button">进展</button>
+          </div>
+        </div>
+
+        <section class="section">
+          <div class="chip-row selectable" id="categoryChips">
+            <button class="chip active" type="button">全部</button>
+            <button class="chip" type="button">手工</button>
+            <button class="chip" type="button">游戏</button>
+            <button class="chip" type="button">书影音</button>
+            <button class="chip" type="button">更多</button>
+          </div>
+        </section>
+
+        <section class="section data-state">
+          <div class="section-title">
+            <h3>当前兴趣项目</h3>
+            <button class="text-button" data-drawer="status" type="button">状态筛选</button>
+          </div>
+          <div class="project-stack">
+            <button class="project-card" data-jump="兴趣项目详情及时间线">
+              <strong>第一次制作衬衫</strong>
+              <span>手工 · 进行中 · 18 张照片</span>
+            </button>
+            <button class="project-card" data-jump="兴趣项目详情及时间线">
+              <strong>艾尔登法环</strong>
+              <span>游戏 · 暂停 · 最近 6月20日</span>
+            </button>
+            <button class="project-card" data-jump="兴趣项目详情及时间线">
+              <strong>《西西弗神话》</strong>
+              <span>书影音 · 进行中 · 6 条记录</span>
+            </button>
+          </div>
+        </section>
+
+        <section class="section data-state">
+          <h3>最近进展</h3>
+          <button class="list-row" data-detail="兴趣进展">
+            <strong>今天 · 衬衫袖口试缝</strong>
+            <span>两边长度不一致，下次拆一边重缝</span>
+          </button>
+          <button class="list-row" data-detail="兴趣进展">
+            <strong>6月24日 · 阅读笔记</strong>
+            <span>整理荒诞主题的一段感想</span>
+          </button>
+        </section>
+
+        <section class="section data-state">
+          <div class="section-title">
+            <h3>最近照片</h3>
+            <button class="text-button" data-scroll-print type="button">待打印</button>
+          </div>
+          <div class="photo-grid">
+            <button class="photo" data-photo="衬衫袖口照片 1"></button>
+            <button class="photo" data-photo="衬衫袖口照片 2"></button>
+            <button class="photo" data-photo="布料细节照片"></button>
+            <button class="photo" data-photo="游戏截图"></button>
+            <button class="photo" data-photo="阅读笔记照片"></button>
+            <button class="photo" data-photo="手帐素材照片"></button>
+          </div>
+        </section>
+
+        <section class="section data-state" id="printSection">
+          <div class="section-title">
+            <h3>待打印照片</h3>
+            <span>3 张</span>
+          </div>
+          <div class="photo-strip">
+            <button class="photo small-photo marked" data-photo="待打印照片 A"></button>
+            <button class="photo small-photo marked" data-photo="待打印照片 B"></button>
+            <button class="photo small-photo marked" data-photo="待打印照片 C"></button>
+          </div>
+          <p class="hint">第一版只支持单张标记和取消，不做批量操作。</p>
+        </section>
+
+        <section class="section empty-state">
+          <div class="empty-box">
+            <h3>还没有兴趣项目</h3>
+            <p>先创建一个项目。之后可以只上传照片，也可以补一段进展。</p>
+            <button class="primary-button" data-form="兴趣项目" type="button">新建兴趣项目</button>
+          </div>
+        </section>
+      </section>
+
+      <nav class="bottom-nav" aria-label="主导航">
+        <button class="active" data-nav="today" type="button">今日</button>
+        <button data-nav="body" type="button">身体</button>
+        <button data-nav="study" type="button">学习</button>
+        <button data-nav="hobby" type="button">兴趣</button>
+      </nav>
+    </main>
+
+    <div class="overlay" id="overlay" hidden></div>
+
+    <aside class="drawer" id="drawer" aria-live="polite" hidden>
+      <div class="drawer-handle"></div>
+      <div id="drawerContent"></div>
+    </aside>
+
+    <section class="modal" id="modal" aria-live="polite" hidden>
+      <div class="modal-card">
+        <div class="section-title">
+          <h3 id="modalTitle">占位弹层</h3>
+          <button class="icon-button" data-close type="button">关闭</button>
+        </div>
+        <div id="modalContent"></div>
+      </div>
+    </section>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
