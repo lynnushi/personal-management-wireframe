@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { BodyFormKind, BodyRecordForm } from "../components/BodyRecordForms";
-import { BodyHistoryItem, DataAccessPort } from "../app/ports";
+import { BodyHistoryItem, BodyRecordType, DataAccessPort, ProfileSummary } from "../app/ports";
+import { getBodyWeatherOption } from "../app/bodyWeather";
+import { calculateBmi, formatBmi } from "../app/bmi";
 import { PageSection } from "../components/PageSection";
 import { PlaceholderCard } from "../components/PlaceholderCard";
 import { PageProps } from "./pageTypes";
@@ -14,6 +16,8 @@ export function TodayPage({ dataAccess, navigate }: TodayPageProps) {
   const [showBodyTypes, setShowBodyTypes] = useState(false);
   const [records, setRecords] = useState<BodyHistoryItem[]>([]);
   const [exerciseTypes, setExerciseTypes] = useState<string[]>([]);
+  const [profile, setProfile] = useState<ProfileSummary | null>(null);
+  const [lastDeleted, setLastDeleted] = useState<{ type: BodyRecordType; id: string } | null>(null);
   const [message, setMessage] = useState("身体记录已接入本地保存。");
 
   useEffect(() => {
@@ -22,24 +26,53 @@ export function TodayPage({ dataAccess, navigate }: TodayPageProps) {
 
   const refreshToday = async () => {
     const today = formatLocalDate(new Date());
-    const [history, overview] = await Promise.all([
+    const [history, overview, nextProfile] = await Promise.all([
       dataAccess.listBodyHistoryByDate(today),
       dataAccess.getBodyOverview(today, today),
+      dataAccess.getProfile(),
     ]);
     setRecords(history);
     setExerciseTypes(overview.exerciseTypes);
+    setProfile(nextProfile);
   };
 
   const handleSaved = async (nextMessage: string) => {
     await refreshToday();
     setActiveForm(null);
     setShowBodyTypes(false);
+    setLastDeleted(null);
     setMessage(nextMessage);
+  };
+
+  const handleDelete = async (record: BodyHistoryItem) => {
+    const confirmed = window.confirm(getDeleteConfirmMessage(record));
+    if (!confirmed) return;
+    const type = getBodyRecordType(record);
+    try {
+      await dataAccess.softDeleteBodyRecord(type, record.item.id);
+      setLastDeleted({ type, id: record.item.id });
+      await refreshToday();
+      setMessage("记录已删除。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "删除失败。");
+    }
+  };
+
+  const handleRestore = async () => {
+    if (!lastDeleted) return;
+    try {
+      await dataAccess.restoreBodyRecord(lastDeleted.type, lastDeleted.id);
+      setLastDeleted(null);
+      await refreshToday();
+      setMessage("记录已恢复。");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "恢复失败。");
+    }
   };
 
   return (
     <>
-      <PageSection title="快捷新增" description="身体记录支持测量、运动、月经和身体状态。">
+      <PageSection title="快捷新增" description="身体记录支持身体天气、运动、月经和身体测量。">
         <div className="quick-grid">
           <button type="button" onClick={() => setShowBodyTypes((value) => !value)}>
             身体
@@ -62,8 +95,8 @@ export function TodayPage({ dataAccess, navigate }: TodayPageProps) {
             <button type="button" onClick={() => setActiveForm("menstrual")}>
               月经
             </button>
-            <button type="button" onClick={() => setActiveForm("status")}>
-              身体状态
+            <button type="button" onClick={() => setActiveForm("weather")}>
+              身体天气
             </button>
           </div>
         ) : null}
@@ -76,6 +109,7 @@ export function TodayPage({ dataAccess, navigate }: TodayPageProps) {
             exerciseTypes={exerciseTypes}
             formKind={activeForm}
             onCancel={() => setActiveForm(null)}
+            onOpenSettings={() => navigate("/settings")}
             onSaved={handleSaved}
           />
         </PageSection>
@@ -88,8 +122,13 @@ export function TodayPage({ dataAccess, navigate }: TodayPageProps) {
               <article className="placeholder-card" key={`${record.type}-${record.item.id}`}>
                 <div>
                   <h3>{getHistoryTitle(record)}</h3>
-                  <p>{getHistorySummary(record)}</p>
+                  <p>{getHistorySummary(record, profile?.height_cm ?? null)}</p>
                   <p>{getHistoryMeta(record)}</p>
+                </div>
+                <div className="button-stack compact-actions">
+                  <button className="text-button danger-button" type="button" onClick={() => handleDelete(record)}>
+                    删除
+                  </button>
                 </div>
               </article>
             ))}
@@ -103,7 +142,14 @@ export function TodayPage({ dataAccess, navigate }: TodayPageProps) {
             navigate={navigate}
           />
         )}
-        <p className="status-text">{message}</p>
+        <div className="status-action-row">
+          <p className="status-text">{message}</p>
+          {lastDeleted ? (
+            <button className="text-button" type="button" onClick={handleRestore}>
+              撤销
+            </button>
+          ) : null}
+        </div>
       </PageSection>
 
       <PageSection title="补记与设置">
@@ -112,7 +158,7 @@ export function TodayPage({ dataAccess, navigate }: TodayPageProps) {
             type="button"
             onClick={() => {
               setShowBodyTypes(true);
-              setActiveForm("measurement");
+              setActiveForm("weather");
             }}
           >
             补记过去日期
@@ -130,14 +176,42 @@ export function getHistoryTitle(record: BodyHistoryItem): string {
   if (record.type === "measurement") return "身体测量";
   if (record.type === "exercise") return "运动";
   if (record.type === "menstrual") return "月经";
-  return "身体状态";
+  const weather = getBodyWeatherOption(record.item.weather_level);
+  return weather ? `${weather.icon} ${weather.name}` : "身体状态（旧记录）";
 }
 
-export function getHistorySummary(record: BodyHistoryItem): string {
+export function getBodyRecordType(record: BodyHistoryItem): BodyRecordType {
+  if (record.type === "measurement") return "measurement";
+  if (record.type === "exercise") return "exercise";
+  if (record.type === "menstrual") return "menstrual";
+  return "weather";
+}
+
+export function getDeleteConfirmMessage(record: BodyHistoryItem): string {
+  const label = getDeleteRecordLabel(record);
+  const effect =
+    record.type === "menstrual"
+      ? "删除后，该记录将从当前周期和统计中移除。"
+      : "删除后，该记录将从趋势和统计中移除。";
+  return `确认删除 ${record.occurred_on} 的${label}吗？\n${effect}`;
+}
+
+function getDeleteRecordLabel(record: BodyHistoryItem): string {
+  if (record.type === "measurement") return "身体测量记录";
+  if (record.type === "exercise") return "运动记录";
+  if (record.type === "menstrual") {
+    return record.item.event_type === "start" ? "月经开始记录" : "月经结束记录";
+  }
+  return record.item.weather_level === null ? "身体状态旧记录" : "身体天气记录";
+}
+
+export function getHistorySummary(record: BodyHistoryItem, heightCm: number | null = null): string {
   if (record.type === "measurement") {
     const item = record.item;
+    const bmi = formatBmi(calculateBmi(item.weight_kg, heightCm));
     return [
       item.weight_kg !== null ? `体重 ${item.weight_kg} kg` : null,
+      bmi ? `BMI ${bmi}` : null,
       item.body_fat_percent !== null ? `体脂率 ${item.body_fat_percent}%` : null,
       item.skeletal_muscle_kg !== null ? `骨骼肌量 ${item.skeletal_muscle_kg} kg` : null,
     ]
@@ -157,7 +231,10 @@ export function getHistorySummary(record: BodyHistoryItem): string {
   if (record.type === "menstrual") {
     return record.item.event_type === "start" ? "开始" : "结束";
   }
-  return record.item.status_tags.length > 0 ? record.item.status_tags.join(" · ") : "身体状态备注";
+  if (record.item.weather_level === null) {
+    return record.item.status_tags.length > 0 ? record.item.status_tags.join(" · ") : "身体状态备注";
+  }
+  return record.item.status_tags.length > 0 ? record.item.status_tags.join(" · ") : "未记录影响因素";
 }
 
 export function getHistoryMeta(record: BodyHistoryItem): string {
@@ -172,7 +249,7 @@ export function getHistoryMeta(record: BodyHistoryItem): string {
 
   const time =
     record.type === "menstrual"
-      ? record.occurred_on
+      ? "全天"
       : new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(
           new Date(record.occurred_at),
         );
@@ -184,7 +261,7 @@ function getFormTitle(kind: BodyFormKind): string {
   if (kind === "measurement") return "身体测量";
   if (kind === "exercise") return "运动记录";
   if (kind === "menstrual") return "月经记录";
-  return "身体状态";
+  return "身体天气";
 }
 
 function formatLocalDate(date: Date): string {

@@ -5,11 +5,17 @@ import {
   BodyMeasurementInput,
   BodyMeasurementSummary,
   BodyOverview,
-  BodyStatusInput,
+  BodyRecordType,
+  BodyStatusSummary,
+  BodyWeatherInput,
   DataAccessPort,
   ExerciseInput,
+  MenstrualSummary,
   MenstrualInput,
+  ProfileInput,
+  ProfileSummary,
 } from "../app/ports";
+import { isBodyWeatherLevel } from "../app/bodyWeather";
 import { parseJsonBackupText } from "./backupValidation";
 import { db } from "./localDatabase";
 import {
@@ -24,6 +30,12 @@ import {
 import { createPresetInterestCategories } from "./presetData";
 
 const BACKUP_FILE_MIME = "application/json;charset=utf-8";
+
+type BodyDeletableRecord =
+  | BodyMeasurementRecord
+  | ExerciseRecord
+  | MenstrualRecord
+  | BodyStatusRecord;
 
 class LocalDataRepository implements DataAccessPort {
   async initialize(): Promise<void> {
@@ -75,6 +87,22 @@ class LocalDataRepository implements DataAccessPort {
       last_backup_at: lastBackupAt,
       interest_category_count: interestCategoryCount,
     };
+  }
+
+  async getProfile(): Promise<ProfileSummary> {
+    await this.initialize();
+    const profile = await getLocalProfile();
+    return profile;
+  }
+
+  async updateProfile(input: ProfileInput): Promise<void> {
+    await this.initialize();
+    validateProfileInput(input);
+    const profile = await getLocalProfile();
+    await db.profile.update(profile.id, {
+      height_cm: input.height_cm,
+      updated_at: new Date().toISOString(),
+    });
   }
 
   async exportJsonBackup(): Promise<Blob> {
@@ -230,15 +258,35 @@ class LocalDataRepository implements DataAccessPort {
     await db.menstrual_records.add(record);
   }
 
-  async createBodyStatusRecord(input: BodyStatusInput): Promise<void> {
+  async getBodyWeatherByDate(date: string): Promise<BodyStatusSummary | null> {
     await this.initialize();
-    validateBodyStatusInput(input);
+    validateDate(date);
+    return findBodyWeatherByDate(date);
+  }
+
+  async saveBodyWeather(input: BodyWeatherInput): Promise<"created" | "updated"> {
+    await this.initialize();
+    validateBodyWeatherInput(input);
     const now = new Date().toISOString();
+    const existing = await findBodyWeatherByDate(input.occurred_on);
+    const normalizedTags = normalizeTags(input.status_tags);
+    if (existing) {
+      await db.body_status_records.update(existing.id, {
+        occurred_at: createOccurredAt(input.occurred_on, formatLocalTime(new Date())),
+        weather_level: input.weather_level,
+        status_tags: normalizedTags,
+        note: normalizeOptionalText(input.note),
+        updated_at: now,
+      });
+      return "updated";
+    }
+
     const record: BodyStatusRecord = {
       id: createLocalId(),
       occurred_on: input.occurred_on,
-      occurred_at: createOccurredAt(input.occurred_on, input.occurred_time),
-      status_tags: input.status_tags.map((tag) => tag.trim()).filter(Boolean),
+      occurred_at: createOccurredAt(input.occurred_on, formatLocalTime(new Date())),
+      weather_level: input.weather_level,
+      status_tags: normalizedTags,
       note: normalizeOptionalText(input.note),
       created_at: now,
       updated_at: now,
@@ -246,25 +294,85 @@ class LocalDataRepository implements DataAccessPort {
       delete_after: null,
     };
     await db.body_status_records.add(record);
+    return "created";
+  }
+
+  async listBodyWeatherInRange(startDate: string, endDate: string): Promise<BodyStatusSummary[]> {
+    await this.initialize();
+    validateDateRange(startDate, endDate);
+    return listStatusesInRange(startDate, endDate);
+  }
+
+  async listMenstrualRecordsForRange(
+    startDate: string,
+    endDate: string,
+  ): Promise<MenstrualSummary[]> {
+    await this.initialize();
+    validateDateRange(startDate, endDate);
+    return listMenstrualContextForRange(startDate, endDate);
+  }
+
+  async softDeleteBodyRecord(type: BodyRecordType, id: string): Promise<void> {
+    await this.initialize();
+    const record = await getBodyRecordByType(type, id);
+    if (!record) {
+      throw new Error("要删除的记录不存在。");
+    }
+    if (record.deleted_at) {
+      throw new Error("该记录已经删除。");
+    }
+    const deletedAt = new Date().toISOString();
+    await updateBodyRecordByType(type, id, {
+      deleted_at: deletedAt,
+      updated_at: deletedAt,
+      delete_after: addDaysIso(deletedAt, 30),
+    });
+  }
+
+  async restoreBodyRecord(type: BodyRecordType, id: string): Promise<void> {
+    await this.initialize();
+    const record = await getBodyRecordByType(type, id);
+    if (!record) {
+      throw new Error("要恢复的记录不存在。");
+    }
+    if (type === "weather" && record.deleted_at) {
+      const existing = await findBodyWeatherByDate(record.occurred_on);
+      if (existing && existing.id !== id) {
+        throw new Error("该日期已有新的身体天气记录，不能直接恢复旧记录。");
+      }
+    }
+    await updateBodyRecordByType(type, id, {
+      deleted_at: null,
+      delete_after: null,
+      updated_at: new Date().toISOString(),
+    });
   }
 
   async getBodyOverview(startDate: string, endDate: string): Promise<BodyOverview> {
     await this.initialize();
-    const [measurements, exercises, menstrualRecords, statuses] = await Promise.all([
+    const [measurements, exercises, menstrualRecords, menstrualContextRecords, statuses] = await Promise.all([
       listMeasurementsInRange(startDate, endDate),
       listExercisesInRange(startDate, endDate),
       listMenstrualInRange(startDate, endDate),
+      listMenstrualContextForRange(startDate, endDate),
       listStatusesInRange(startDate, endDate),
     ]);
 
     const history = createHistory(measurements, exercises, menstrualRecords, statuses);
-    const exerciseTypes = Array.from(new Set((await db.exercise_records.toArray()).map((item) => item.exercise_type))).sort();
+    const exerciseTypes = Array.from(
+      new Set(
+        (await db.exercise_records.filter((item) => !item.deleted_at).toArray()).map(
+          (item) => item.exercise_type,
+        ),
+      ),
+    ).sort();
     const sources = new Set(measurements.map((item) => item.source).filter(Boolean));
 
     return {
       measurements,
       exercises,
       menstrualRecords,
+      menstrualContextRecords,
       statuses,
       history,
       exerciseTypes,
@@ -336,6 +444,25 @@ async function putRequiredMetaAfterImport(importedAt: string): Promise<void> {
   await db.app_meta.put({ key: "last_imported_backup_at", value: importedAt });
 }
 
+async function getLocalProfile(): Promise<ProfileRecord> {
+  const profile = await db.profile.get("local");
+  if (profile) return profile;
+  const now = new Date().toISOString();
+  const fallback: ProfileRecord = {
+    id: "local",
+    display_name: null,
+    height_cm: null,
+    body_goal: null,
+    weight_unit: "kg",
+    distance_unit: "km",
+    duration_unit: "minute",
+    created_at: now,
+    updated_at: now,
+  };
+  await db.profile.put(fallback);
+  return fallback;
+}
+
 async function putMetaIfMissing(key: string, value: unknown): Promise<void> {
   const existing = await db.app_meta.get(key);
   if (!existing) {
@@ -365,6 +492,16 @@ function validateBodyMeasurementInput(input: BodyMeasurementInput): void {
   }
 }
 
+function validateProfileInput(input: ProfileInput): void {
+  if (input.height_cm === null) return;
+  if (!Number.isFinite(input.height_cm) || input.height_cm <= 0) {
+    throw new Error("身高必须大于 0。");
+  }
+  if (input.height_cm < 50 || input.height_cm > 260) {
+    throw new Error("请输入合理的身高，单位为 cm。");
+  }
+}
+
 function validateExerciseInput(input: ExerciseInput): void {
   validateDate(input.occurred_on);
   if (!input.exercise_type.trim()) {
@@ -385,12 +522,10 @@ async function validateMenstrualInput(input: MenstrualInput): Promise<void> {
   }
 }
 
-function validateBodyStatusInput(input: BodyStatusInput): void {
+function validateBodyWeatherInput(input: BodyWeatherInput): void {
   validateDate(input.occurred_on);
-  const hasTags = input.status_tags.some((tag) => tag.trim().length > 0);
-  const hasNote = Boolean(normalizeOptionalText(input.note));
-  if (!hasTags && !hasNote) {
-    throw new Error("状态标签或备注至少填写一项。");
+  if (!isBodyWeatherLevel(input.weather_level)) {
+    throw new Error("请选择身体天气。");
   }
 }
 
@@ -400,6 +535,14 @@ function validateDate(date: string): void {
   }
   if (date > getTodayDateString()) {
     throw new Error("不能保存未来日期的记录。");
+  }
+}
+
+function validateDateRange(startDate: string, endDate: string): void {
+  validateDate(startDate);
+  validateDate(endDate);
+  if (startDate > endDate) {
+    throw new Error("开始日期不能晚于结束日期。");
   }
 }
 
@@ -417,6 +560,43 @@ function normalizeOptionalText(value: string | null): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function normalizeTags(values: string[]): string[] {
+  return Array.from(new Set(values.map((tag) => tag.trim()).filter(Boolean)));
+}
+
+async function getBodyRecordByType(type: BodyRecordType, id: string): Promise<BodyDeletableRecord | undefined> {
+  if (type === "measurement") return db.body_measurements.get(id);
+  if (type === "exercise") return db.exercise_records.get(id);
+  if (type === "menstrual") return db.menstrual_records.get(id);
+  return db.body_status_records.get(id);
+}
+
+async function updateBodyRecordByType(
+  type: BodyRecordType,
+  id: string,
+  changes: Pick<BodyDeletableRecord, "deleted_at" | "updated_at"> & { delete_after: string | null },
+): Promise<void> {
+  if (type === "measurement") {
+    await db.body_measurements.update(id, changes);
+    return;
+  }
+  if (type === "exercise") {
+    await db.exercise_records.update(id, changes);
+    return;
+  }
+  if (type === "menstrual") {
+    await db.menstrual_records.update(id, changes);
+    return;
+  }
+  await db.body_status_records.update(id, changes);
+}
+
+function addDaysIso(value: string, days: number): string {
+  const date = new Date(value);
+  date.setDate(date.getDate() + days);
+  return date.toISOString();
+}
+
 function createLocalId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return crypto.randomUUID();
@@ -429,6 +609,12 @@ function formatLocalDate(date: Date): string {
   const month = `${date.getMonth() + 1}`.padStart(2, "0");
   const day = `${date.getDate()}`.padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function formatLocalTime(date: Date): string {
+  const hour = `${date.getHours()}`.padStart(2, "0");
+  const minute = `${date.getMinutes()}`.padStart(2, "0");
+  return `${hour}:${minute}`;
 }
 
 async function listMeasurementsInRange(
@@ -458,12 +644,61 @@ async function listMenstrualInRange(startDate: string, endDate: string): Promise
     .sortBy("occurred_on");
 }
 
+async function listMenstrualContextForRange(
+  startDate: string,
+  endDate: string,
+): Promise<MenstrualRecord[]> {
+  const records = (await db.menstrual_records.filter((item) => !item.deleted_at).toArray()).sort(
+    (a, b) => a.occurred_on.localeCompare(b.occurred_on),
+  );
+  const context = new Map<string, MenstrualRecord>();
+  let latestOpenStartBeforeRange: MenstrualRecord | null = null;
+  let shouldIncludeUntilNextEnd = false;
+
+  for (const record of records) {
+    if (record.occurred_on < startDate) {
+      if (record.event_type === "start") latestOpenStartBeforeRange = record;
+      if (record.event_type === "end" && latestOpenStartBeforeRange) {
+        latestOpenStartBeforeRange = null;
+      }
+      continue;
+    }
+
+    if (record.occurred_on <= endDate) {
+      context.set(record.id, record);
+      if (record.event_type === "start") shouldIncludeUntilNextEnd = true;
+      if (record.event_type === "end") shouldIncludeUntilNextEnd = false;
+      continue;
+    }
+
+    if (shouldIncludeUntilNextEnd && record.event_type === "end") {
+      context.set(record.id, record);
+      break;
+    }
+  }
+
+  if (latestOpenStartBeforeRange) {
+    context.set(latestOpenStartBeforeRange.id, latestOpenStartBeforeRange);
+  }
+
+  return Array.from(context.values()).sort((a, b) => a.occurred_on.localeCompare(b.occurred_on));
+}
+
 async function listStatusesInRange(startDate: string, endDate: string): Promise<BodyStatusRecord[]> {
   return db.body_status_records
     .where("occurred_on")
     .between(startDate, endDate, true, true)
     .filter((item) => !item.deleted_at)
     .sortBy("occurred_at");
+}
+
+async function findBodyWeatherByDate(date: string): Promise<BodyStatusRecord | null> {
+  const records = await db.body_status_records
+    .where("occurred_on")
+    .equals(date)
+    .filter((item) => !item.deleted_at)
+    .sortBy("updated_at");
+  return records.reverse()[0] ?? null;
 }
 
 function createHistory(

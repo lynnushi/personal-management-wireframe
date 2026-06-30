@@ -1,3 +1,5 @@
+import { BodyWeatherLevel } from "./bodyWeather";
+
 export interface LocalEntity {
   id: string;
   created_at: string;
@@ -10,6 +12,22 @@ export interface AppMetadata {
   installed_at: string | null;
   last_backup_at: string | null;
   interest_category_count: number;
+}
+
+export interface ProfileSummary {
+  id: string;
+  display_name: string | null;
+  height_cm: number | null;
+  body_goal: string | null;
+  weight_unit: string;
+  distance_unit: string;
+  duration_unit: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ProfileInput {
+  height_cm: number | null;
 }
 
 export interface BodyMeasurementInput {
@@ -75,9 +93,9 @@ export interface MenstrualSummary extends LocalEntity {
   note: string | null;
 }
 
-export interface BodyStatusInput {
+export interface BodyWeatherInput {
   occurred_on: string;
-  occurred_time: string;
+  weather_level: BodyWeatherLevel;
   status_tags: string[];
   note: string | null;
 }
@@ -85,9 +103,12 @@ export interface BodyStatusInput {
 export interface BodyStatusSummary extends LocalEntity {
   occurred_on: string;
   occurred_at: string;
+  weather_level: BodyWeatherLevel | null;
   status_tags: string[];
   note: string | null;
 }
+
+export type BodyRecordType = "measurement" | "exercise" | "menstrual" | "weather";
 
 export type BodyHistoryItem =
   | { type: "measurement"; occurred_on: string; occurred_at: string; item: BodyMeasurementSummary }
@@ -99,6 +120,7 @@ export interface BodyOverview {
   measurements: BodyMeasurementSummary[];
   exercises: ExerciseSummary[];
   menstrualRecords: MenstrualSummary[];
+  menstrualContextRecords: MenstrualSummary[];
   statuses: BodyStatusSummary[];
   history: BodyHistoryItem[];
   exerciseTypes: string[];
@@ -108,13 +130,20 @@ export interface BodyOverview {
 export interface DataAccessPort {
   initialize(): Promise<void>;
   getMetadata(): Promise<AppMetadata>;
+  getProfile(): Promise<ProfileSummary>;
+  updateProfile(input: ProfileInput): Promise<void>;
   exportJsonBackup(): Promise<Blob>;
   importJsonBackup(file: File): Promise<void>;
   createBodyMeasurement(input: BodyMeasurementInput): Promise<void>;
   listBodyMeasurementsByDate(date: string): Promise<BodyMeasurementSummary[]>;
   createExerciseRecord(input: ExerciseInput): Promise<void>;
   createMenstrualRecord(input: MenstrualInput): Promise<void>;
-  createBodyStatusRecord(input: BodyStatusInput): Promise<void>;
+  getBodyWeatherByDate(date: string): Promise<BodyStatusSummary | null>;
+  saveBodyWeather(input: BodyWeatherInput): Promise<"created" | "updated">;
+  listBodyWeatherInRange(startDate: string, endDate: string): Promise<BodyStatusSummary[]>;
+  listMenstrualRecordsForRange(startDate: string, endDate: string): Promise<MenstrualSummary[]>;
+  softDeleteBodyRecord(type: BodyRecordType, id: string): Promise<void>;
+  restoreBodyRecord(type: BodyRecordType, id: string): Promise<void>;
   getBodyOverview(startDate: string, endDate: string): Promise<BodyOverview>;
   listBodyHistoryByDate(date: string): Promise<BodyHistoryItem[]>;
 }
@@ -131,4 +160,4 @@ export interface ImageStoragePort {
   deletePhoto(photoId: string): Promise<void>;
 }
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;

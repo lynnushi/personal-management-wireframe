@@ -1,3 +1,5 @@
+import { BodyWeatherLevel } from "../app/bodyWeather";
+
 export interface AppMetaEntry {
   key: string;
   value: unknown;
@@ -57,6 +59,7 @@ export interface MenstrualRecord extends TimestampedRecord {
 export interface BodyStatusRecord extends TimestampedRecord {
   occurred_on: string;
   occurred_at: string;
+  weather_level: BodyWeatherLevel | null;
   status_tags: string[];
   note: string | null;
 }
