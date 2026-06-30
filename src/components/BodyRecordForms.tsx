@@ -1,18 +1,25 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import {
+  BODY_WEATHER_IMPACT_TAGS,
+  BODY_WEATHER_LEVELS,
+  BodyWeatherLevel,
+} from "../app/bodyWeather";
+import { calculateBmi, formatBmi } from "../app/bmi";
 import {
   BodyMeasurementInput,
-  BodyStatusInput,
+  BodyWeatherInput,
   DataAccessPort,
   ExerciseInput,
   MenstrualInput,
 } from "../app/ports";
 
-export type BodyFormKind = "measurement" | "exercise" | "menstrual" | "status";
+export type BodyFormKind = "measurement" | "exercise" | "menstrual" | "weather";
 
 interface BodyRecordFormsProps {
   dataAccess: DataAccessPort;
   formKind: BodyFormKind;
   exerciseTypes: string[];
+  onOpenSettings?: () => void;
   onSaved: (message: string) => Promise<void> | void;
   onCancel: () => void;
 }
@@ -21,11 +28,19 @@ export function BodyRecordForm({
   dataAccess,
   formKind,
   exerciseTypes,
+  onOpenSettings,
   onSaved,
   onCancel,
 }: BodyRecordFormsProps) {
   if (formKind === "measurement") {
-    return <MeasurementForm dataAccess={dataAccess} onCancel={onCancel} onSaved={onSaved} />;
+    return (
+      <MeasurementForm
+        dataAccess={dataAccess}
+        onCancel={onCancel}
+        onOpenSettings={onOpenSettings}
+        onSaved={onSaved}
+      />
+    );
   }
   if (formKind === "exercise") {
     return (
@@ -40,10 +55,10 @@ export function BodyRecordForm({
   if (formKind === "menstrual") {
     return <MenstrualForm dataAccess={dataAccess} onCancel={onCancel} onSaved={onSaved} />;
   }
-  return <StatusForm dataAccess={dataAccess} onCancel={onCancel} onSaved={onSaved} />;
+  return <WeatherForm dataAccess={dataAccess} onCancel={onCancel} onSaved={onSaved} />;
 }
 
-function MeasurementForm({ dataAccess, onSaved, onCancel }: FormProps) {
+function MeasurementForm({ dataAccess, onSaved, onCancel, onOpenSettings }: FormProps) {
   const [form, setForm] = useState(() => ({
     occurred_on: formatLocalDate(new Date()),
     occurred_time: formatLocalTime(new Date()),
@@ -55,6 +70,25 @@ function MeasurementForm({ dataAccess, onSaved, onCancel }: FormProps) {
     note: "",
   }));
   const [message, setMessage] = useState("体重、体脂率、骨骼肌量至少填写一项。");
+  const [heightCm, setHeightCm] = useState<number | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    const loadProfile = async () => {
+      try {
+        const profile = await dataAccess.getProfile();
+        if (active) setHeightCm(profile.height_cm);
+      } catch {
+        if (active) setHeightCm(null);
+      }
+    };
+    void loadProfile();
+    return () => {
+      active = false;
+    };
+  }, [dataAccess]);
+
+  const previewBmi = formatBmi(calculateBmi(parseOptionalNumber(form.weight_kg), heightCm));
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -89,6 +123,21 @@ function MeasurementForm({ dataAccess, onSaved, onCancel }: FormProps) {
         <NumberField label="体重 kg" name="weight_kg" value={form.weight_kg} onChange={(value) => setForm((current) => ({ ...current, weight_kg: value }))} />
         <NumberField label="体脂率 %" name="body_fat_percent" value={form.body_fat_percent} onChange={(value) => setForm((current) => ({ ...current, body_fat_percent: value }))} />
         <NumberField label="骨骼肌量 kg" name="skeletal_muscle_kg" value={form.skeletal_muscle_kg} onChange={(value) => setForm((current) => ({ ...current, skeletal_muscle_kg: value }))} />
+      </div>
+      <div className="notice-panel compact-notice">
+        <p>
+          {previewBmi
+            ? `预计 BMI：${previewBmi}`
+            : heightCm
+              ? "输入体重后可自动预览 BMI。"
+              : "设置身高后可自动计算 BMI。"}
+        </p>
+        <p>BMI根据当前身高和体重自动计算，仅供个人趋势参考。</p>
+        {!heightCm && onOpenSettings ? (
+          <button className="text-button" type="button" onClick={onOpenSettings}>
+            去设置身高
+          </button>
+        ) : null}
       </div>
       <TextField label="测量来源" name="source" placeholder="家用体脂秤、InBody、医院等" value={form.source} onChange={(value) => setForm((current) => ({ ...current, source: value }))} />
       <TextField label="测量状态" name="condition" placeholder="晨起空腹、饭后、运动后等" value={form.condition} onChange={(value) => setForm((current) => ({ ...current, condition: value }))} />
@@ -235,27 +284,74 @@ function MenstrualForm({ dataAccess, onSaved, onCancel }: FormProps) {
   );
 }
 
-function StatusForm({ dataAccess, onSaved, onCancel }: FormProps) {
+function WeatherForm({ dataAccess, onSaved, onCancel }: FormProps) {
   const [form, setForm] = useState(() => ({
     occurred_on: formatLocalDate(new Date()),
-    occurred_time: formatLocalTime(new Date()),
-    status_tags: "",
+    weather_level: null as BodyWeatherLevel | null,
+    selected_tags: [] as string[],
+    custom_tags: "",
     note: "",
   }));
-  const [message, setMessage] = useState("状态标签或备注至少填写一项。");
+  const [message, setMessage] = useState("天气必选；影响因素和备注可选。");
+
+  useEffect(() => {
+    let active = true;
+    const loadExisting = async () => {
+      try {
+        const existing = await dataAccess.getBodyWeatherByDate(form.occurred_on);
+        if (!active) return;
+        setForm((current) => {
+          if (current.occurred_on !== form.occurred_on) return current;
+          const knownTags = existing?.status_tags.filter((tag) =>
+            BODY_WEATHER_IMPACT_TAGS.includes(tag),
+          ) ?? [];
+          const customTags = existing?.status_tags.filter(
+            (tag) => !BODY_WEATHER_IMPACT_TAGS.includes(tag),
+          ) ?? [];
+          return {
+            ...current,
+            weather_level: existing?.weather_level ?? null,
+            selected_tags: knownTags,
+            custom_tags: customTags.join("、"),
+            note: existing?.note ?? "",
+          };
+        });
+        setMessage(existing ? "已载入该日记录，保存后会更新原记录。" : "天气必选；影响因素和备注可选。");
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "读取已有记录失败。");
+      }
+    };
+
+    void loadExisting();
+    return () => {
+      active = false;
+    };
+  }, [dataAccess, form.occurred_on]);
+
+  const toggleTag = (tag: string) => {
+    setForm((current) => ({
+      ...current,
+      selected_tags: current.selected_tags.includes(tag)
+        ? current.selected_tags.filter((item) => item !== tag)
+        : [...current.selected_tags, tag],
+    }));
+  };
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-    const input: BodyStatusInput = {
-      occurred_on: getFormString(formData, "occurred_on"),
-      occurred_time: getFormString(formData, "occurred_time"),
-      status_tags: splitTags(getFormString(formData, "status_tags")),
-      note: getFormString(formData, "note"),
+    if (form.weather_level === null) {
+      setMessage("请选择身体天气。");
+      return;
+    }
+    const input: BodyWeatherInput = {
+      occurred_on: form.occurred_on,
+      weather_level: form.weather_level,
+      status_tags: [...form.selected_tags, ...splitTags(form.custom_tags)],
+      note: form.note,
     };
     try {
-      await dataAccess.createBodyStatusRecord(input);
-      await onSaved("身体状态已保存。");
+      const result = await dataAccess.saveBodyWeather(input);
+      await onSaved(result === "updated" ? "身体天气已更新。" : "身体天气已保存。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "保存失败。");
     }
@@ -263,14 +359,65 @@ function StatusForm({ dataAccess, onSaved, onCancel }: FormProps) {
 
   return (
     <form className="form-stack" onSubmit={submit}>
-      <DateTimeFields
-        date={form.occurred_on}
-        time={form.occurred_time}
-        onDate={(value) => setForm((current) => ({ ...current, occurred_on: value }))}
-        onTime={(value) => setForm((current) => ({ ...current, occurred_time: value }))}
+      <label>
+        记录日期
+        <input
+          max={formatLocalDate(new Date())}
+          name="occurred_on"
+          type="date"
+          value={form.occurred_on}
+          onChange={(event) =>
+            setForm((current) => ({ ...current, occurred_on: event.target.value }))
+          }
+        />
+      </label>
+      <fieldset className="weather-fieldset">
+        <legend>今天的身体天气怎么样？</legend>
+        <div className="weather-options">
+          {BODY_WEATHER_LEVELS.map((option) => (
+            <button
+              aria-pressed={form.weather_level === option.level}
+              className="weather-option"
+              key={option.level}
+              type="button"
+              onClick={() =>
+                setForm((current) => ({ ...current, weather_level: option.level }))
+              }
+            >
+              <span>{option.icon}</span>
+              <strong>{option.name}</strong>
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <fieldset className="weather-fieldset">
+        <legend>影响因素标签</legend>
+        <div className="chip-row">
+          {BODY_WEATHER_IMPACT_TAGS.map((tag) => (
+            <button
+              aria-pressed={form.selected_tags.includes(tag)}
+              key={tag}
+              type="button"
+              onClick={() => toggleTag(tag)}
+            >
+              {tag}
+            </button>
+          ))}
+        </div>
+      </fieldset>
+      <TextField
+        label="自定义标签"
+        name="custom_tags"
+        placeholder="用顿号或逗号分隔"
+        value={form.custom_tags}
+        onChange={(value) => setForm((current) => ({ ...current, custom_tags: value }))}
       />
-      <TextField label="状态标签" name="status_tags" placeholder="疲劳、浮肿、睡眠不足，用顿号或逗号分隔" value={form.status_tags} onChange={(value) => setForm((current) => ({ ...current, status_tags: value }))} />
-      <TextareaField label="备注" name="note" value={form.note} onChange={(value) => setForm((current) => ({ ...current, note: value }))} />
+      <TextareaField
+        label="备注"
+        name="note"
+        value={form.note}
+        onChange={(value) => setForm((current) => ({ ...current, note: value }))}
+      />
       <FormActions message={message} onCancel={onCancel} />
     </form>
   );
@@ -278,6 +425,7 @@ function StatusForm({ dataAccess, onSaved, onCancel }: FormProps) {
 
 interface FormProps {
   dataAccess: DataAccessPort;
+  onOpenSettings?: () => void;
   onSaved: (message: string) => Promise<void> | void;
   onCancel: () => void;
 }
@@ -287,11 +435,11 @@ function DateTimeFields({ date, time, onDate, onTime }: { date: string; time: st
     <div className="field-grid">
       <label>
         记录日期
-        <input max={formatLocalDate(new Date())} name="occurred_on" type="date" defaultValue={date} onChange={(event) => onDate(event.target.value)} />
+        <input max={formatLocalDate(new Date())} name="occurred_on" type="date" value={date} onChange={(event) => onDate(event.target.value)} />
       </label>
       <label>
         记录时间
-        <input name="occurred_time" type="time" defaultValue={time} onChange={(event) => onTime(event.target.value)} />
+        <input name="occurred_time" type="time" value={time} onChange={(event) => onTime(event.target.value)} />
       </label>
     </div>
   );
@@ -301,7 +449,7 @@ function NumberField({ label, name, value, onChange }: { label: string; name: st
   return (
     <label>
       {label}
-      <input inputMode="decimal" min="0" name={name} step="0.1" type="number" defaultValue={value} onChange={(event) => onChange(event.target.value)} />
+      <input inputMode="decimal" min="0" name={name} step="0.1" type="number" value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
@@ -310,7 +458,7 @@ function TextField({ label, name, value, onChange, placeholder }: { label: strin
   return (
     <label>
       {label}
-      <input name={name} placeholder={placeholder} type="text" defaultValue={value} onChange={(event) => onChange(event.target.value)} />
+      <input name={name} placeholder={placeholder} type="text" value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }
@@ -319,7 +467,7 @@ function TextareaField({ label, name, value, onChange }: { label: string; name: 
   return (
     <label>
       {label}
-      <textarea name={name} rows={3} defaultValue={value} onChange={(event) => onChange(event.target.value)} />
+      <textarea name={name} rows={3} value={value} onChange={(event) => onChange(event.target.value)} />
     </label>
   );
 }

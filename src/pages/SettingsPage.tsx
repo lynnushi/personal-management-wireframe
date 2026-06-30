@@ -1,7 +1,6 @@
-import { ChangeEvent, useEffect, useRef, useState } from "react";
-import { AppMetadata, DataAccessPort } from "../app/ports";
+import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { AppMetadata, DataAccessPort, ProfileSummary } from "../app/ports";
 import { PageSection } from "../components/PageSection";
-import { PlaceholderCard } from "../components/PlaceholderCard";
 import { createBackupFilename, downloadBlob } from "../utils/download";
 import { PageProps } from "./pageTypes";
 
@@ -12,6 +11,8 @@ interface SettingsPageProps extends PageProps {
 export function SettingsPage({ dataAccess }: SettingsPageProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [metadata, setMetadata] = useState<AppMetadata | null>(null);
+  const [profile, setProfile] = useState<ProfileSummary | null>(null);
+  const [heightInput, setHeightInput] = useState("");
   const [status, setStatus] = useState("本地数据库准备中。");
   const [isBusy, setIsBusy] = useState(false);
 
@@ -20,9 +21,30 @@ export function SettingsPage({ dataAccess }: SettingsPageProps) {
   }, []);
 
   const refreshMetadata = async () => {
-    const nextMetadata = await dataAccess.getMetadata();
+    const [nextMetadata, nextProfile] = await Promise.all([
+      dataAccess.getMetadata(),
+      dataAccess.getProfile(),
+    ]);
     setMetadata(nextMetadata);
+    setProfile(nextProfile);
+    setHeightInput(nextProfile.height_cm === null ? "" : String(nextProfile.height_cm));
     setStatus("本地数据库已初始化。");
+  };
+
+  const handleSaveProfile = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsBusy(true);
+    try {
+      const trimmed = heightInput.trim();
+      const height_cm = trimmed === "" ? null : Number(trimmed);
+      await dataAccess.updateProfile({ height_cm });
+      await refreshMetadata();
+      setStatus("个人资料已保存。");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "保存个人资料失败。");
+    } finally {
+      setIsBusy(false);
+    }
   };
 
   const handleExport = async () => {
@@ -74,10 +96,33 @@ export function SettingsPage({ dataAccess }: SettingsPageProps) {
   return (
     <>
       <PageSection title="基础设置">
-        <PlaceholderCard
-          title="个人资料已初始化"
-          body="第二阶段只创建本地 profile 默认数据，身高、目标和常用单位编辑会在后续阶段接入。"
-        />
+        <form className="form-stack" onSubmit={handleSaveProfile}>
+          <article className="placeholder-card">
+            <div>
+              <h3>个人资料</h3>
+              <p>当前身高：{profile?.height_cm ? `${profile.height_cm} cm` : "未设置"}</p>
+              <p>BMI 根据当前身高和体重自动计算，仅供个人趋势参考。</p>
+            </div>
+          </article>
+          <label>
+            身高 cm
+            <input
+              inputMode="decimal"
+              min="50"
+              name="height_cm"
+              placeholder="例如 165"
+              step="0.1"
+              type="number"
+              value={heightInput}
+              onChange={(event) => setHeightInput(event.target.value)}
+            />
+          </label>
+          <div className="action-row">
+            <button disabled={isBusy} type="submit">
+              保存个人资料
+            </button>
+          </div>
+        </form>
       </PageSection>
       <PageSection title="数据管理">
         <div className="stack">
@@ -112,7 +157,6 @@ export function SettingsPage({ dataAccess }: SettingsPageProps) {
             <p>覆盖导入前请先导出当前 JSON；第二阶段暂不包含图片和 ZIP 备份。</p>
           </article>
           <p className="status-text">{status}</p>
-          <PlaceholderCard title="归档与回收站占位" body="归档项目、30 天回收站和恢复规则会在维护阶段实现。" />
         </div>
       </PageSection>
     </>

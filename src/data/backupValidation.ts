@@ -1,3 +1,4 @@
+import { isBodyWeatherLevel } from "../app/bodyWeather";
 import { BackupData, JsonBackup } from "./models";
 
 const BACKUP_ARRAY_KEYS: Array<keyof BackupData> = [
@@ -72,6 +73,7 @@ function validateExerciseRecords(records: unknown[]): void {
     ) {
       throw new Error("exercise_records 数据格式不正确。");
     }
+    normalizeDeleteFields(record);
   }
 }
 
@@ -85,6 +87,7 @@ function validateMenstrualRecords(records: unknown[]): void {
     ) {
       throw new Error("menstrual_records 数据格式不正确。");
     }
+    normalizeDeleteFields(record);
   }
 }
 
@@ -98,6 +101,16 @@ function validateBodyStatusRecords(records: unknown[]): void {
     ) {
       throw new Error("body_status_records 数据格式不正确。");
     }
+    if (!("weather_level" in record)) {
+      record.weather_level = null;
+    }
+    if (record.weather_level !== null && !isBodyWeatherLevel(record.weather_level)) {
+      throw new Error("body_status_records 天气等级不正确。");
+    }
+    if (!Array.isArray(record.status_tags)) {
+      record.status_tags = [];
+    }
+    normalizeDeleteFields(record);
   }
 }
 
@@ -111,6 +124,7 @@ function validateBodyMeasurements(records: unknown[]): void {
     ) {
       throw new Error("body_measurements 数据格式不正确。");
     }
+    normalizeDeleteFields(measurement);
   }
 }
 
@@ -131,6 +145,17 @@ function validateProfile(records: unknown[]): void {
     if (!isRecord(profile) || typeof profile.id !== "string") {
       throw new Error("profile 数据格式不正确。");
     }
+    if (!("height_cm" in profile)) {
+      profile.height_cm = null;
+    }
+    if (
+      profile.height_cm !== null &&
+      (typeof profile.height_cm !== "number" ||
+        !Number.isFinite(profile.height_cm) ||
+        profile.height_cm <= 0)
+    ) {
+      throw new Error("profile 身高数据格式不正确。");
+    }
   }
 }
 
@@ -150,4 +175,19 @@ function validateInterestCategories(records: unknown[]): void {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeDeleteFields(record: Record<string, unknown>): void {
+  if (!("deleted_at" in record)) {
+    record.deleted_at = null;
+  }
+  if (!("delete_after" in record)) {
+    record.delete_after = null;
+  }
+  if (record.deleted_at !== null && typeof record.deleted_at !== "string") {
+    throw new Error("记录删除时间格式不正确。");
+  }
+  if (record.delete_after !== null && typeof record.delete_after !== "string") {
+    throw new Error("记录清理时间格式不正确。");
+  }
 }
