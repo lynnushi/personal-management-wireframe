@@ -127,6 +127,11 @@ export interface BodyOverview {
   hasMultipleMeasurementSources: boolean;
 }
 
+export interface BodyDataBounds {
+  earliestMeasurementDate: string | null;
+  earliestBodyRecordDate: string | null;
+}
+
 export interface DataAccessPort {
   initialize(): Promise<void>;
   getMetadata(): Promise<AppMetadata>;
@@ -144,6 +149,7 @@ export interface DataAccessPort {
   listMenstrualRecordsForRange(startDate: string, endDate: string): Promise<MenstrualSummary[]>;
   softDeleteBodyRecord(type: BodyRecordType, id: string): Promise<void>;
   restoreBodyRecord(type: BodyRecordType, id: string): Promise<void>;
+  getBodyDataBounds(): Promise<BodyDataBounds>;
   getBodyOverview(startDate: string, endDate: string): Promise<BodyOverview>;
   listBodyHistoryByDate(date: string): Promise<BodyHistoryItem[]>;
 }

@@ -1,6 +1,7 @@
 import {
   SCHEMA_VERSION,
   AppMetadata,
+  BodyDataBounds,
   BodyHistoryItem,
   BodyMeasurementInput,
   BodyMeasurementSummary,
@@ -348,6 +349,25 @@ class LocalDataRepository implements DataAccessPort {
     });
   }
 
+  async getBodyDataBounds(): Promise<BodyDataBounds> {
+    await this.initialize();
+    const [measurements, exercises, menstrualRecords, statuses] = await Promise.all([
+      db.body_measurements.filter((item) => !item.deleted_at).toArray(),
+      db.exercise_records.filter((item) => !item.deleted_at).toArray(),
+      db.menstrual_records.filter((item) => !item.deleted_at).toArray(),
+      db.body_status_records.filter((item) => !item.deleted_at).toArray(),
+    ]);
+    return {
+      earliestMeasurementDate: getEarliestOccurredOn(measurements),
+      earliestBodyRecordDate: getEarliestOccurredOn([
+        ...measurements,
+        ...exercises,
+        ...menstrualRecords,
+        ...statuses,
+      ]),
+    };
+  }
+
   async getBodyOverview(startDate: string, endDate: string): Promise<BodyOverview> {
     await this.initialize();
     const [measurements, exercises, menstrualRecords, menstrualContextRecords, statuses] = await Promise.all([
@@ -690,6 +710,13 @@ async function listStatusesInRange(startDate: string, endDate: string): Promise<
     .between(startDate, endDate, true, true)
     .filter((item) => !item.deleted_at)
     .sortBy("occurred_at");
+}
+
+function getEarliestOccurredOn(records: Array<{ occurred_on: string }>): string | null {
+  return records.reduce<string | null>((earliest, record) => {
+    if (!earliest || record.occurred_on < earliest) return record.occurred_on;
+    return earliest;
+  }, null);
 }
 
 async function findBodyWeatherByDate(date: string): Promise<BodyStatusRecord | null> {

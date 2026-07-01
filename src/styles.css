@@ -125,6 +125,76 @@ button[aria-current="page"] {
   margin: 0;
 }
 
+.collapsible-section {
+  padding: 0;
+}
+
+.collapsible-header {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  padding: 16px;
+  text-align: left;
+  width: 100%;
+}
+
+.collapsible-header:hover {
+  background: rgba(47, 93, 98, 0.06);
+}
+
+.collapsible-heading {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.collapsible-title {
+  color: #262522;
+  font-size: 17px;
+  font-weight: 800;
+}
+
+.collapsible-summary,
+.collapsible-description {
+  color: #6a645b;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.collapsible-description {
+  font-weight: 500;
+}
+
+.collapsible-arrow {
+  align-items: center;
+  background: #e8e1d8;
+  border-radius: 999px;
+  color: #2f5d62;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 18px;
+  font-weight: 800;
+  height: 32px;
+  justify-content: center;
+  line-height: 1;
+  width: 32px;
+}
+
+.collapsible-content {
+  border-top: 1px solid rgba(38, 37, 34, 0.1);
+  padding: 16px;
+}
+
+.module-stack {
+  display: grid;
+  gap: 14px;
+}
+
 .placeholder-card {
   align-items: flex-start;
   background: #fbfaf7;
@@ -266,6 +336,10 @@ button[aria-current="page"] {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.range-controls {
+  flex-wrap: wrap;
 }
 
 .timeline-table-wrap {
