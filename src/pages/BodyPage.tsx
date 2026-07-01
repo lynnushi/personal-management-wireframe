@@ -6,6 +6,7 @@ import {
 } from "../app/bodyWeather";
 import { calculateBmi, formatBmi } from "../app/bmi";
 import {
+  BodyDataBounds,
   BodyHistoryItem,
   BodyMeasurementSummary,
   BodyOverview,
@@ -16,8 +17,7 @@ import {
   MenstrualSummary,
   ProfileSummary,
 } from "../app/ports";
-import { BodyFormKind, BodyRecordForm } from "../components/BodyRecordForms";
-import { PageSection } from "../components/PageSection";
+import { CollapsibleSection } from "../components/CollapsibleSection";
 import {
   getBodyRecordType,
   getDeleteConfirmMessage,
@@ -31,7 +31,7 @@ interface BodyPageProps extends PageProps {
   dataAccess: DataAccessPort;
 }
 
-type RangeKey = "7d" | "30d" | "month";
+type RangeKey = "all" | "year" | "month" | "week" | "30d";
 type LayerKey = "weather" | "exercise" | "menstrual" | "measurement";
 type LayerState = Record<LayerKey, boolean>;
 type TrendMetric = "weight_kg" | "bmi" | "body_fat_percent" | "skeletal_muscle_kg";
@@ -57,6 +57,19 @@ interface MenstrualDay {
   dayNumber: number | null;
 }
 
+interface DateBounds {
+  start: string;
+  end: string;
+}
+
+const RANGE_OPTIONS: Array<{ key: RangeKey; label: string }> = [
+  { key: "all", label: "全部数据" },
+  { key: "year", label: "本年" },
+  { key: "month", label: "本月" },
+  { key: "week", label: "本周" },
+  { key: "30d", label: "近30天" },
+];
+
 const LAYER_LABELS: Record<LayerKey, string> = {
   weather: "身体天气",
   exercise: "运动",
@@ -64,8 +77,17 @@ const LAYER_LABELS: Record<LayerKey, string> = {
   measurement: "身体测量",
 };
 
-export function BodyPage({ dataAccess, navigate }: BodyPageProps) {
-  const [range, setRange] = useState<RangeKey>("7d");
+const TREND_LABELS: Record<TrendMetric, string> = {
+  weight_kg: "体重",
+  bmi: "BMI",
+  body_fat_percent: "体脂率",
+  skeletal_muscle_kg: "骨骼肌量",
+};
+
+export function BodyPage({ dataAccess }: BodyPageProps) {
+  const today = useMemo(() => formatLocalDate(new Date()), []);
+  const [trendRange, setTrendRange] = useState<RangeKey>("month");
+  const [comparisonRange, setComparisonRange] = useState<RangeKey>("month");
   const [trendMetric, setTrendMetric] = useState<TrendMetric>("weight_kg");
   const [layers, setLayers] = useState<LayerState>({
     weather: true,
@@ -73,40 +95,126 @@ export function BodyPage({ dataAccess, navigate }: BodyPageProps) {
     menstrual: false,
     measurement: false,
   });
-  const [overview, setOverview] = useState<BodyOverview | null>(null);
+  const [bounds, setBounds] = useState<BodyDataBounds>({
+    earliestMeasurementDate: null,
+    earliestBodyRecordDate: null,
+  });
+  const [trendOverview, setTrendOverview] = useState<BodyOverview>(() => createEmptyOverview());
+  const [comparisonOverview, setComparisonOverview] = useState<BodyOverview>(() => createEmptyOverview());
+  const [historyOverview, setHistoryOverview] = useState<BodyOverview>(() => createEmptyOverview());
   const [profile, setProfile] = useState<ProfileSummary | null>(null);
-  const [activeForm, setActiveForm] = useState<BodyFormKind | null>(null);
   const [lastDeleted, setLastDeleted] = useState<{ type: BodyRecordType; id: string } | null>(null);
   const [message, setMessage] = useState("身体天气用于个人趋势统计，不代表医学评分。");
 
-  const rangeBounds = useMemo(() => getRangeBounds(range), [range]);
-  const dates = useMemo(
-    () => createDateRange(rangeBounds.start, rangeBounds.end),
-    [rangeBounds.start, rangeBounds.end],
+  const comparisonBounds = useMemo(
+    () => getRangeBounds(comparisonRange, bounds.earliestBodyRecordDate, today),
+    [bounds.earliestBodyRecordDate, comparisonRange, today],
   );
-  const dailyData = useMemo(
-    () => (overview ? createDailyData(dates, overview) : []),
-    [dates, overview],
+  const comparisonDates = useMemo(
+    () => (comparisonBounds ? createDateRange(comparisonBounds.start, comparisonBounds.end) : []),
+    [comparisonBounds],
   );
+  const comparisonDailyData = useMemo(
+    () => createDailyData(comparisonDates, comparisonOverview),
+    [comparisonDates, comparisonOverview],
+  );
+  const trendPoints = useMemo(
+    () =>
+      getRepresentativeTrend(
+        trendOverview.measurements,
+        trendMetric,
+        profile?.height_cm ?? null,
+      ),
+    [profile?.height_cm, trendMetric, trendOverview.measurements],
+  );
+  const visibleLayerCount = Object.values(layers).filter(Boolean).length;
+  const latestMeasurement = getLatestMeasurement(historyOverview.measurements);
 
   useEffect(() => {
-    void refreshOverview();
-  }, [rangeBounds.start, rangeBounds.end]);
+    void refreshBaseData();
+  }, [dataAccess]);
 
-  const refreshOverview = async () => {
-    const [nextOverview, nextProfile] = await Promise.all([
-      dataAccess.getBodyOverview(rangeBounds.start, rangeBounds.end),
+  useEffect(() => {
+    void refreshTrend();
+  }, [dataAccess, trendRange, bounds.earliestMeasurementDate]);
+
+  useEffect(() => {
+    void refreshComparison();
+  }, [dataAccess, comparisonRange, bounds.earliestBodyRecordDate]);
+
+  useEffect(() => {
+    void refreshHistory();
+  }, [dataAccess, bounds.earliestBodyRecordDate]);
+
+  const refreshBaseData = async () => {
+    const [nextBounds, nextProfile] = await Promise.all([
+      dataAccess.getBodyDataBounds(),
       dataAccess.getProfile(),
     ]);
-    setOverview(nextOverview);
+    setBounds(nextBounds);
     setProfile(nextProfile);
   };
 
-  const handleSaved = async (nextMessage: string) => {
-    await refreshOverview();
-    setActiveForm(null);
-    setLastDeleted(null);
-    setMessage(nextMessage);
+  const refreshTrend = async () => {
+    const nextBounds = getRangeBounds(trendRange, bounds.earliestMeasurementDate, today);
+    if (!nextBounds) {
+      setTrendOverview(createEmptyOverview());
+      return;
+    }
+    setTrendOverview(await dataAccess.getBodyOverview(nextBounds.start, nextBounds.end));
+  };
+
+  const refreshComparison = async () => {
+    const nextBounds = getRangeBounds(comparisonRange, bounds.earliestBodyRecordDate, today);
+    if (!nextBounds) {
+      setComparisonOverview(createEmptyOverview());
+      return;
+    }
+    setComparisonOverview(await dataAccess.getBodyOverview(nextBounds.start, nextBounds.end));
+  };
+
+  const refreshHistory = async () => {
+    if (!bounds.earliestBodyRecordDate) {
+      setHistoryOverview(createEmptyOverview());
+      return;
+    }
+    setHistoryOverview(await dataAccess.getBodyOverview(bounds.earliestBodyRecordDate, today));
+  };
+
+  const refreshAll = async () => {
+    const [nextBounds, nextProfile] = await Promise.all([
+      dataAccess.getBodyDataBounds(),
+      dataAccess.getProfile(),
+    ]);
+    const nextTrendBounds = getRangeBounds(
+      trendRange,
+      nextBounds.earliestMeasurementDate,
+      today,
+    );
+    const nextComparisonBounds = getRangeBounds(
+      comparisonRange,
+      nextBounds.earliestBodyRecordDate,
+      today,
+    );
+    const nextHistoryBounds = nextBounds.earliestBodyRecordDate
+      ? { start: nextBounds.earliestBodyRecordDate, end: today }
+      : null;
+    const [nextTrend, nextComparison, nextHistory] = await Promise.all([
+      nextTrendBounds
+        ? dataAccess.getBodyOverview(nextTrendBounds.start, nextTrendBounds.end)
+        : Promise.resolve(createEmptyOverview()),
+      nextComparisonBounds
+        ? dataAccess.getBodyOverview(nextComparisonBounds.start, nextComparisonBounds.end)
+        : Promise.resolve(createEmptyOverview()),
+      nextHistoryBounds
+        ? dataAccess.getBodyOverview(nextHistoryBounds.start, nextHistoryBounds.end)
+        : Promise.resolve(createEmptyOverview()),
+    ]);
+    setBounds(nextBounds);
+    setProfile(nextProfile);
+    setTrendOverview(nextTrend);
+    setComparisonOverview(nextComparison);
+    setHistoryOverview(nextHistory);
   };
 
   const handleDelete = async (record: BodyHistoryItem) => {
@@ -116,7 +224,7 @@ export function BodyPage({ dataAccess, navigate }: BodyPageProps) {
     try {
       await dataAccess.softDeleteBodyRecord(type, record.item.id);
       setLastDeleted({ type, id: record.item.id });
-      await refreshOverview();
+      await refreshAll();
       setMessage("记录已删除。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "删除失败。");
@@ -128,7 +236,7 @@ export function BodyPage({ dataAccess, navigate }: BodyPageProps) {
     try {
       await dataAccess.restoreBodyRecord(lastDeleted.type, lastDeleted.id);
       setLastDeleted(null);
-      await refreshOverview();
+      await refreshAll();
       setMessage("记录已恢复。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "恢复失败。");
@@ -139,185 +247,125 @@ export function BodyPage({ dataAccess, navigate }: BodyPageProps) {
     setLayers((current) => ({ ...current, [key]: !current[key] }));
   };
 
-  const today = formatLocalDate(new Date());
-  const todayWeather = dailyData.find((item) => item.date === today)?.weather ?? null;
-  const latestMeasurement =
-    overview && overview.measurements.length > 0
-      ? overview.measurements[overview.measurements.length - 1]
-      : null;
-  const trendPoints = getRepresentativeTrend(
-    overview?.measurements ?? [],
-    trendMetric,
-    profile?.height_cm ?? null,
-  );
-  const visibleLayerCount = Object.values(layers).filter(Boolean).length;
-  const todayWeatherHistoryItem = todayWeather
-    ? ({
-        type: "status",
-        occurred_on: todayWeather.occurred_on,
-        occurred_at: todayWeather.occurred_at,
-        item: todayWeather,
-      } satisfies BodyHistoryItem)
-    : null;
-
   return (
     <>
-      <PageSection title="今天的身体天气">
-        <article className="weather-today">
-          <div>
-            <h3>{formatWeatherTitle(todayWeather)}</h3>
-            <p>{formatWeatherSummary(todayWeather)}</p>
-          </div>
-          <div className="action-row">
-            <button type="button" onClick={() => setActiveForm("weather")}>
-              {todayWeather ? "修改今天记录" : "记录身体天气"}
-            </button>
-            {todayWeatherHistoryItem ? (
+      <CollapsibleSection
+        defaultExpanded
+        description="趋势使用每日代表测量值：优先晨起空腹，其次当天最早记录。"
+        summary={formatTrendSummary(trendMetric, trendRange, trendPoints)}
+        title="身体趋势"
+      >
+        <div className="module-stack">
+          <RangeControls value={trendRange} onChange={setTrendRange} />
+          <div className="segmented">
+            {(Object.keys(TREND_LABELS) as TrendMetric[]).map((metric) => (
               <button
-                className="ghost-button danger-button"
+                aria-pressed={trendMetric === metric}
+                key={metric}
                 type="button"
-                onClick={() => handleDelete(todayWeatherHistoryItem)}
+                onClick={() => setTrendMetric(metric)}
               >
-                删除今天记录
+                {TREND_LABELS[metric]}
+              </button>
+            ))}
+          </div>
+          {trendMetric === "bmi" ? (
+            <p className="status-text">BMI根据当前身高和体重自动计算，仅供个人趋势参考。</p>
+          ) : null}
+          {trendPoints.length >= 2 ? (
+            <MiniTrendChart points={trendPoints} />
+          ) : (
+            <p>当前数据不足，记录2个以上有效日期后可查看趋势。</p>
+          )}
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        defaultExpanded
+        summary={formatComparisonSummary(comparisonRange, layers)}
+        title="身体数据对照"
+      >
+        <div className="module-stack">
+          <RangeControls value={comparisonRange} onChange={setComparisonRange} />
+          <div className="layer-toggle-grid">
+            {(Object.keys(LAYER_LABELS) as LayerKey[]).map((key) => (
+              <button
+                aria-pressed={layers[key]}
+                className="layer-toggle"
+                key={key}
+                type="button"
+                onClick={() => toggleLayer(key)}
+              >
+                {LAYER_LABELS[key]}
+              </button>
+            ))}
+          </div>
+          {visibleLayerCount === 0 ? (
+            <p className="status-text">请至少选择一项要显示的数据。</p>
+          ) : (
+            <>
+              <MultiTrackView
+                dailyData={comparisonDailyData}
+                heightCm={profile?.height_cm ?? null}
+                layers={layers}
+                range={comparisonRange}
+              />
+              <StatsPanel dailyData={comparisonDailyData} layers={layers} />
+            </>
+          )}
+        </div>
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        defaultExpanded={false}
+        summary={formatHistorySummary(historyOverview.history, latestMeasurement)}
+        title="身体历史"
+      >
+        <div className="module-stack">
+          <div className="status-action-row">
+            <p className="status-text">{message}</p>
+            {lastDeleted ? (
+              <button className="text-button" type="button" onClick={handleRestore}>
+                撤销
               </button>
             ) : null}
-            <button className="ghost-button" type="button" onClick={() => setActiveForm("exercise")}>
-              运动
-            </button>
-            <button className="ghost-button" type="button" onClick={() => setActiveForm("menstrual")}>
-              月经
-            </button>
-            <button className="ghost-button" type="button" onClick={() => setActiveForm("measurement")}>
-              身体测量
-            </button>
           </div>
-        </article>
-        <div className="status-action-row">
-          <p className="status-text">{message}</p>
-          {lastDeleted ? (
-            <button className="text-button" type="button" onClick={handleRestore}>
-              撤销
-            </button>
-          ) : null}
-        </div>
-      </PageSection>
-
-      {activeForm && overview ? (
-        <PageSection title={getFormTitle(activeForm)}>
-          <BodyRecordForm
-            dataAccess={dataAccess}
-            exerciseTypes={overview.exerciseTypes}
-            formKind={activeForm}
-            onCancel={() => setActiveForm(null)}
-            onOpenSettings={() => navigate("/settings")}
-            onSaved={handleSaved}
-          />
-        </PageSection>
-      ) : null}
-
-      <PageSection title="最近身体测量">
-        {latestMeasurement ? (
-          <article className="placeholder-card">
-            <div>
-              <h3>{latestMeasurement.occurred_on}</h3>
-              <p>{formatMeasurementSummary(latestMeasurement, profile?.height_cm ?? null)}</p>
-              <p>
-                {[latestMeasurement.source, latestMeasurement.condition].filter(Boolean).join(" · ") ||
-                  "未记录来源和状态"}
-              </p>
-            </div>
-          </article>
-        ) : (
-          <p>还没有身体测量记录。</p>
-        )}
-      </PageSection>
-
-      <PageSection title="时间范围">
-        <div className="segmented">
-          <button type="button" aria-pressed={range === "7d"} onClick={() => setRange("7d")}>
-            近7天
-          </button>
-          <button type="button" aria-pressed={range === "30d"} onClick={() => setRange("30d")}>
-            近30天
-          </button>
-          <button type="button" aria-pressed={range === "month"} onClick={() => setRange("month")}>
-            本月
-          </button>
-        </div>
-      </PageSection>
-
-      <PageSection title="显示内容">
-        <div className="layer-toggle-grid">
-          {(Object.keys(LAYER_LABELS) as LayerKey[]).map((key) => (
-            <button
-              aria-pressed={layers[key]}
-              className="layer-toggle"
-              key={key}
-              type="button"
-              onClick={() => toggleLayer(key)}
-            >
-              {LAYER_LABELS[key]}
-            </button>
-          ))}
-        </div>
-        {visibleLayerCount === 0 ? <p className="status-text">请至少选择一项要显示的数据。</p> : null}
-      </PageSection>
-
-      <PageSection title="身体趋势" description="趋势使用每日代表测量值：优先晨起空腹，其次当天最早记录。">
-        <div className="segmented">
-          <button type="button" aria-pressed={trendMetric === "weight_kg"} onClick={() => setTrendMetric("weight_kg")}>
-            体重
-          </button>
-          <button type="button" aria-pressed={trendMetric === "bmi"} onClick={() => setTrendMetric("bmi")}>
-            BMI
-          </button>
-          <button type="button" aria-pressed={trendMetric === "body_fat_percent"} onClick={() => setTrendMetric("body_fat_percent")}>
-            体脂率
-          </button>
-          <button type="button" aria-pressed={trendMetric === "skeletal_muscle_kg"} onClick={() => setTrendMetric("skeletal_muscle_kg")}>
-            骨骼肌量
-          </button>
-        </div>
-        {trendMetric === "bmi" ? (
-          <p className="status-text">BMI根据当前身高和体重自动计算，仅供个人趋势参考。</p>
-        ) : null}
-        {trendPoints.length >= 2 ? (
-          <MiniTrendChart points={trendPoints} />
-        ) : (
-          <p>当前数据不足，记录 2 个以上有效日期后可查看趋势。</p>
-        )}
-      </PageSection>
-
-      <PageSection title="多轨时间视图">
-        {visibleLayerCount === 0 ? (
-          <p>请至少选择一项要显示的数据。</p>
-        ) : (
-          <MultiTrackView
-            dailyData={dailyData}
+          <LatestMeasurementCard
             heightCm={profile?.height_cm ?? null}
-            layers={layers}
-            range={range}
+            measurement={latestMeasurement}
           />
-        )}
-      </PageSection>
-
-      <PageSection title="自动统计和事实观察">
-        {visibleLayerCount === 0 ? (
-          <p>请至少选择一项要显示的数据。</p>
-        ) : (
-          <StatsPanel dailyData={dailyData} layers={layers} />
-        )}
-      </PageSection>
-
-      <PageSection title="身体历史">
-        <HistoryList
-          empty="所选时间范围内暂无身体记录。"
-          heightCm={profile?.height_cm ?? null}
-          items={overview?.history ?? []}
-          onDelete={handleDelete}
-        />
-      </PageSection>
+          <HistoryList
+            empty="暂无身体历史记录。"
+            heightCm={profile?.height_cm ?? null}
+            items={historyOverview.history}
+            onDelete={handleDelete}
+          />
+        </div>
+      </CollapsibleSection>
     </>
+  );
+}
+
+function RangeControls({
+  value,
+  onChange,
+}: {
+  value: RangeKey;
+  onChange: (range: RangeKey) => void;
+}) {
+  return (
+    <div className="segmented range-controls">
+      {RANGE_OPTIONS.map((option) => (
+        <button
+          aria-pressed={value === option.key}
+          key={option.key}
+          type="button"
+          onClick={() => onChange(option.key)}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -332,7 +380,9 @@ function MultiTrackView({
   layers: LayerState;
   range: RangeKey;
 }) {
-  if (range === "7d") {
+  if (dailyData.length === 0) return <p>当前范围内暂无身体记录。</p>;
+
+  if (range === "week") {
     return (
       <>
         <div className="timeline-table-wrap">
@@ -583,6 +633,26 @@ function MiniTrendChart({ points }: { points: Array<{ date: string; value: numbe
   );
 }
 
+function LatestMeasurementCard({
+  measurement,
+  heightCm,
+}: {
+  measurement: BodyMeasurementSummary | null;
+  heightCm: number | null;
+}) {
+  if (!measurement) return <p>还没有身体测量记录。</p>;
+  const meta = [measurement.source, measurement.condition].filter(Boolean).join(" · ");
+  return (
+    <article className="placeholder-card">
+      <div>
+        <h3>最近身体测量 · {formatReadableDate(measurement.occurred_on)}</h3>
+        <p>{formatMeasurementSummary(measurement, heightCm)}</p>
+        {meta ? <p>{meta}</p> : null}
+      </div>
+    </article>
+  );
+}
+
 function HistoryList({
   items,
   empty,
@@ -708,6 +778,10 @@ function getRepresentativeTrend(
     .sort((a, b) => a.date.localeCompare(b.date));
 }
 
+function getLatestMeasurement(measurements: BodyMeasurementSummary[]): BodyMeasurementSummary | null {
+  return [...measurements].sort((a, b) => b.occurred_at.localeCompare(a.occurred_at))[0] ?? null;
+}
+
 function getMenstrualDays(records: MenstrualSummary[], dates: string[]): Map<string, MenstrualDay> {
   const dateSet = new Set(dates);
   const endDate = dates[dates.length - 1] ?? "";
@@ -771,17 +845,6 @@ function renderDayLines(
   return lines.length > 0 ? lines : <p>—</p>;
 }
 
-function formatWeatherTitle(status: BodyStatusSummary | null): string {
-  const weather = getBodyWeatherOption(status?.weather_level ?? null);
-  return weather ? `${weather.icon} ${weather.name}` : "今天还没有身体天气";
-}
-
-function formatWeatherSummary(status: BodyStatusSummary | null): string {
-  if (!status) return "记录后会和运动、经期、身体测量按日期自动整合。";
-  const tags = status.status_tags.length > 0 ? status.status_tags.join(" · ") : "未记录影响因素";
-  return status.note ? `${tags} · ${status.note}` : tags;
-}
-
 function formatWeatherCell(status: BodyStatusSummary | null): string {
   const weather = getBodyWeatherOption(status?.weather_level ?? null);
   return weather ? `${weather.icon} ${weather.name}` : "—";
@@ -830,6 +893,45 @@ function formatMeasurementSummary(item: BodyMeasurementSummary, heightCm: number
   ]
     .filter(Boolean)
     .join(" · ");
+}
+
+function formatTrendSummary(
+  metric: TrendMetric,
+  range: RangeKey,
+  points: Array<{ date: string; value: number }>,
+): string {
+  const latest = points[points.length - 1];
+  const latestText = latest ? ` · 最新 ${formatTrendValue(metric, latest.value)}` : "";
+  return `${TREND_LABELS[metric]} · ${getRangeLabel(range)} · ${points.length}个有效日期${latestText}`;
+}
+
+function formatComparisonSummary(range: RangeKey, layers: LayerState): string {
+  const selected = (Object.keys(LAYER_LABELS) as LayerKey[])
+    .filter((key) => layers[key])
+    .map((key) => LAYER_LABELS[key]);
+  return `${getRangeLabel(range)} · ${selected.length > 0 ? selected.join("、") : "尚未选择显示内容"}`;
+}
+
+function formatHistorySummary(
+  history: BodyHistoryItem[],
+  latestMeasurement: BodyMeasurementSummary | null,
+): string {
+  if (history.length === 0) return "暂无身体历史记录";
+  const weight =
+    latestMeasurement?.weight_kg !== null && latestMeasurement?.weight_kg !== undefined
+      ? ` · 最近体重${latestMeasurement.weight_kg} kg`
+      : "";
+  return `最近记录 ${formatReadableDate(history[0].occurred_on)} · 共${history.length}条${weight}`;
+}
+
+function formatTrendValue(metric: TrendMetric, value: number): string {
+  if (metric === "bmi") return value.toFixed(1);
+  if (metric === "body_fat_percent") return `${value}%`;
+  return `${value}kg`;
+}
+
+function getRangeLabel(range: RangeKey): string {
+  return RANGE_OPTIONS.find((option) => option.key === range)?.label ?? "本月";
 }
 
 function getWeatherStats(weatherDays: DailyBodyData[]) {
@@ -882,12 +984,27 @@ function getTopTags(days: DailyBodyData[]): string[] {
     .map(([tag, count]) => `${tag} ${count}`);
 }
 
-function getRangeBounds(range: RangeKey) {
-  const end = new Date();
-  const start = new Date();
-  if (range === "7d") start.setDate(end.getDate() - 6);
+function getRangeBounds(range: RangeKey, allStartDate: string | null, today: string): DateBounds | null {
+  if (range === "all") {
+    if (!allStartDate) return null;
+    return {
+      start: allStartDate,
+      end: allStartDate > today ? allStartDate : today,
+    };
+  }
+
+  const end = parseLocalDate(today);
+  const start = parseLocalDate(today);
   if (range === "30d") start.setDate(end.getDate() - 29);
   if (range === "month") start.setDate(1);
+  if (range === "year") {
+    start.setMonth(0);
+    start.setDate(1);
+  }
+  if (range === "week") {
+    const mondayOffset = (end.getDay() + 6) % 7;
+    start.setDate(end.getDate() - mondayOffset);
+  }
   return { start: formatLocalDate(start), end: formatLocalDate(end) };
 }
 
@@ -911,6 +1028,11 @@ function formatMonthDay(date: string): string {
   return `${parsed.getMonth() + 1}/${parsed.getDate()}`;
 }
 
+function formatReadableDate(date: string): string {
+  const parsed = parseLocalDate(date);
+  return `${parsed.getMonth() + 1}月${parsed.getDate()}日`;
+}
+
 function parseLocalDate(date: string): Date {
   const [year, month, day] = date.split("-").map(Number);
   return new Date(year, month - 1, day);
@@ -927,9 +1049,15 @@ function formatLocalDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function getFormTitle(kind: BodyFormKind): string {
-  if (kind === "measurement") return "身体测量";
-  if (kind === "exercise") return "运动记录";
-  if (kind === "menstrual") return "月经记录";
-  return "身体天气";
+function createEmptyOverview(): BodyOverview {
+  return {
+    measurements: [],
+    exercises: [],
+    menstrualRecords: [],
+    menstrualContextRecords: [],
+    statuses: [],
+    history: [],
+    exerciseTypes: [],
+    hasMultipleMeasurementSources: false,
+  };
 }
