@@ -79,7 +79,8 @@ export function normalizePath(pathname: string): AppRoute {
 
 export function routeFromLocation(location: Location): AppRoute {
   const hashPath = location.hash.startsWith("#/") ? location.hash.slice(1) : "";
-  return normalizePath(hashPath || location.pathname);
+  const path = (hashPath || location.pathname).split("?")[0];
+  return normalizePath(path);
 }
 
 export function pathForHashRoute(route: AppRoute): string {

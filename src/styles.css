@@ -489,6 +489,7 @@ label {
 }
 
 input,
+select,
 textarea {
   background: #fff;
   border: 1px solid rgba(38, 37, 34, 0.18);
@@ -503,6 +504,31 @@ textarea {
 textarea {
   min-height: 84px;
   resize: vertical;
+}
+
+.inline-form {
+  background: #fbfaf7;
+  border: 1px solid rgba(38, 37, 34, 0.1);
+  border-radius: 8px;
+  padding: 14px;
+}
+
+.learning-metrics {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin-top: 12px;
+}
+
+.learning-card {
+  overflow-wrap: anywhere;
+}
+
+.learning-card a {
+  color: #2f5d62;
+}
+
+.ai-prompt-box {
+  min-height: 360px;
+  white-space: pre-wrap;
 }
 
 .visually-hidden {
