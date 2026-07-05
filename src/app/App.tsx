@@ -48,9 +48,9 @@ export function App() {
       case "/body":
         return <BodyPage dataAccess={localDataRepository} navigate={navigate} />;
       case "/learning":
-        return <LearningPage navigate={navigate} />;
+        return <LearningPage dataAccess={localDataRepository} navigate={navigate} />;
       case "/learning/project":
-        return <LearningProjectPage navigate={navigate} />;
+        return <LearningProjectPage dataAccess={localDataRepository} navigate={navigate} />;
       case "/interests":
         return <InterestsPage navigate={navigate} />;
       case "/interests/project":

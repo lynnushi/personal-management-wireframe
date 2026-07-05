@@ -115,6 +115,20 @@ export function TodayPage({ dataAccess, navigate }: TodayPageProps) {
         </PageSection>
       ) : null}
 
+      <PageSection title="今日学习">
+        <article className="placeholder-card">
+          <div>
+            <h3>学习记录请先到学习项目详情页添加</h3>
+            <p>V1-A 先在学习项目里维护目标、路径、Routine、记录和反馈，今日页快捷记录会在后续版本接入。</p>
+          </div>
+          <div className="button-stack compact-actions">
+            <button type="button" onClick={() => navigate("/learning")}>
+              前往学习页
+            </button>
+          </div>
+        </article>
+      </PageSection>
+
       <PageSection title="今日已记录内容">
         {records.length > 0 ? (
           <div className="stack">
